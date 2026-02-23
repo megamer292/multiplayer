@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Multiplayer WASD + Minimap</title>
+  <style>
+    body { background:#222; color:#eee; font-family:sans-serif; text-align:center; }
+    #gameContainer { display:flex; gap:20px; justify-content:center; margin-top:20px; }
+    canvas { background:#111; border:2px solid #555; }
+  </style>
+</head>
+<body>
+
+<h1>Multiplayer WASD + Minimap</h1>
+
+<div id="gameContainer">
+  <canvas id="mainCanvas" width="600" height="400"></canvas>
+  <canvas id="miniCanvas" width="200" height="200"></canvas>
+</div>
+
+<script>
+  const mainCanvas = document.getElementById("mainCanvas");
+  const mainCtx = mainCanvas.getContext("2d");
+
+  const miniCanvas = document.getElementById("miniCanvas");
+  const miniCtx = miniCanvas.getContext("2d");
+
+  const worldWidth = 2000;
+  const worldHeight = 2000;
+
+  const keys = { w:false, a:false, s:false, d:false };
+
+  const player = {
+    id: null,
+    x: worldWidth/2,
+    y: worldHeight/2,
+    size: 20,
+    speed: 3,
+    color: "deepskyblue"
+  };
+
+  const others = {}; // other players
+
+  const camera = { x:0, y:0, width:600, height:400 };
+
+  const miniScaleX = miniCanvas.width / worldWidth;
+  const miniScaleY = miniCanvas.height / worldHeight;
+
+  // Multiplayer WebSocket
+  const socket = new WebSocket("ws://localhost:8080");
+
+  socket.onmessage = (event) => {
+    const data = JSON.parse(event.data);
+
+    if (data.type === "init") {
+      player.id = data.id;
+      Object.assign(others, data.players);
+      delete others[player.id];
+    }
+
+    if (data.type === "update") {
+      others[data.id] = { x:data.x, y:data.y };
+    }
+
+    if (data.type === "remove") {
+      delete others[data.id];
+    }
+  };
+
+  window.addEventListener("keydown", e => keys[e.key.toLowerCase()] = true);
+  window.addEventListener("keyup", e => keys[e.key.toLowerCase()] = false);
+
+  function update() {
+    if (keys.w) player.y -= player.speed;
+    if (keys.s) player.y += player.speed;
+    if (keys.a) player.x -= player.speed;
+    if (keys.d) player.x += player.speed;
+
+    player.x = Math.max(10, Math.min(worldWidth-10, player.x));
+    player.y = Math.max(10, Math.min(worldHeight-10, player.y));
+
+    camera.x = player.x - camera.width/2;
+    camera.y = player.y - camera.height/2;
+
+    camera.x = Math.max(0, Math.min(worldWidth-camera.width, camera.x));
+    camera.y = Math.max(0, Math.min(worldHeight-camera.height, camera.y));
+
+    // Send position to server
+    if (player.id) {
+      socket.send(JSON.stringify({
+        type: "move",
+        x: player.x,
+        y: player.y
+      }));
+    }
+  }
+
+  function drawMain() {
+    mainCtx.clearRect(0,0,mainCanvas.width,mainCanvas.height);
+
+    // Draw player
+    const px = player.x - camera.x;
+    const py = player.y - camera.y;
+    mainCtx.fillStyle = player.color;
+    mainCtx.beginPath();
+    mainCtx.arc(px, py, player.size/2, 0, Math.PI*2);
+    mainCtx.fill();
+
+    // Draw other players
+    mainCtx.fillStyle = "orange";
+    for (let id in others) {
+      const op = others[id];
+      const ox = op.x - camera.x;
+      const oy = op.y - camera.y;
+      mainCtx.beginPath();
+      mainCtx.arc(ox, oy, 10, 0, Math.PI*2);
+      mainCtx.fill();
+    }
+  }
+
+  function drawMinimap() {
+    miniCtx.clearRect(0,0,miniCanvas.width,miniCanvas.height);
+
+    // Player
+    miniCtx.fillStyle = player.color;
+    miniCtx.beginPath();
+    miniCtx.arc(player.x*miniScaleX, player.y*miniScaleY, 4, 0, Math.PI*2);
+    miniCtx.fill();
+
+    // Others
+    miniCtx.fillStyle = "orange";
+    for (let id in others) {
+      const op = others[id];
+      miniCtx.beginPath();
+      miniCtx.arc(op.x*miniScaleX, op.y*miniScaleY, 4, 0, Math.PI*2);
+      miniCtx.fill();
+    }
+
+    // Camera box
+    miniCtx.strokeStyle = "yellow";
+    miniCtx.strokeRect(
+      camera.x * miniScaleX,
+      camera.y * miniScaleY,
+      camera.width * miniScaleX,
+      camera.height * miniScaleY
+    );
+  }
+
+  function loop() {
+    update();
+    drawMain();
+    drawMinimap();
+    requestAnimationFrame(loop);
+  }
+
+  loop();
+</script>
+
+</body>
+</html>
