@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>Multiplayer WASD + Minimap</title>
+  <title>First Person Multiplayer + Walls</title>
   <style>
     body { background:#222; color:#eee; font-family:sans-serif; text-align:center; }
     #gameContainer { display:flex; gap:20px; justify-content:center; margin-top:20px; }
@@ -11,7 +11,7 @@
 </head>
 <body>
 
-<h1>Multiplayer WASD + Minimap</h1>
+<h1>First Person Multiplayer + Raycast Walls</h1>
 
 <div id="gameContainer">
   <canvas id="mainCanvas" width="600" height="400"></canvas>
@@ -19,141 +19,247 @@
 </div>
 
 <script>
-  const mainCanvas = document.getElementById("mainCanvas");
-  const mainCtx = mainCanvas.getContext("2d");
+const mainCanvas = document.getElementById("mainCanvas");
+const ctx = mainCanvas.getContext("2d");
 
-  const miniCanvas = document.getElementById("miniCanvas");
-  const miniCtx = miniCanvas.getContext("2d");
+const miniCanvas = document.getElementById("miniCanvas");
+const miniCtx = miniCanvas.getContext("2d");
 
-  const worldWidth = 2000;
-  const worldHeight = 2000;
+const TILE = 50;
 
-  const keys = { w:false, a:false, s:false, d:false };
+// Simple wall map (1 = wall, 0 = empty)
+const map = [
+  [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+  [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+  [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+  [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+  [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+  [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+  [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+  [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+  [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+  [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+  [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+  [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+  [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+  [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+  [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+  [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+  [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+  [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+  [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+  [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+];
 
-  const player = {
-    id: null,
-    x: worldWidth/2,
-    y: worldHeight/2,
-    size: 20,
-    speed: 3,
-    color: "deepskyblue"
-  };
+const worldWidth = map[0].length * TILE;
+const worldHeight = map.length * TILE;
 
-  const others = {}; // other players
+const keys = { w:false, a:false, s:false, d:false };
 
-  const camera = { x:0, y:0, width:600, height:400 };
+const player = {
+  id: null,
+  x: 150,
+  y: 150,
+  dir: 0,
+  speed: 1,
+  turnSpeed: 0.05,
+  fov: Math.PI/3
+};
 
-  const miniScaleX = miniCanvas.width / worldWidth;
-  const miniScaleY = miniCanvas.height / worldHeight;
+const others = {};
 
-  // Multiplayer WebSocket
-  const socket = new WebSocket("ws://localhost:3000");
+const miniScaleX = miniCanvas.width / worldWidth;
+const miniScaleY = miniCanvas.height / worldHeight;
 
-  socket.onmessage = (event) => {
-    const data = JSON.parse(event.data);
+// WebSocket
+const socket = new WebSocket("ws://localhost:8080");
 
-    if (data.type === "init") {
-      player.id = data.id;
-      Object.assign(others, data.players);
-      delete others[player.id];
-    }
+socket.onmessage = (event) => {
+  const data = JSON.parse(event.data);
 
-    if (data.type === "update") {
-      others[data.id] = { x:data.x, y:data.y };
-    }
-
-    if (data.type === "remove") {
-      delete others[data.id];
-    }
-  };
-
-  window.addEventListener("keydown", e => keys[e.key.toLowerCase()] = true);
-  window.addEventListener("keyup", e => keys[e.key.toLowerCase()] = false);
-
-  function update() {
-    if (keys.w) player.y -= player.speed;
-    if (keys.s) player.y += player.speed;
-    if (keys.a) player.x -= player.speed;
-    if (keys.d) player.x += player.speed;
-
-    player.x = Math.max(10, Math.min(worldWidth-10, player.x));
-    player.y = Math.max(10, Math.min(worldHeight-10, player.y));
-
-    camera.x = player.x - camera.width/2;
-    camera.y = player.y - camera.height/2;
-
-    camera.x = Math.max(0, Math.min(worldWidth-camera.width, camera.x));
-    camera.y = Math.max(0, Math.min(worldHeight-camera.height, camera.y));
-
-    // Send position to server
-    if (player.id) {
-      socket.send(JSON.stringify({
-        type: "move",
-        x: player.x,
-        y: player.y
-      }));
-    }
+  if (data.type === "init") {
+    player.id = data.id;
+    Object.assign(others, data.players);
+    delete others[player.id];
   }
 
-  function drawMain() {
-    mainCtx.clearRect(0,0,mainCanvas.width,mainCanvas.height);
-
-    // Draw player
-    const px = player.x - camera.x;
-    const py = player.y - camera.y;
-    mainCtx.fillStyle = player.color;
-    mainCtx.beginPath();
-    mainCtx.arc(px, py, player.size/2, 0, Math.PI*2);
-    mainCtx.fill();
-
-    // Draw other players
-    mainCtx.fillStyle = "orange";
-    for (let id in others) {
-      const op = others[id];
-      const ox = op.x - camera.x;
-      const oy = op.y - camera.y;
-      mainCtx.beginPath();
-      mainCtx.arc(ox, oy, 10, 0, Math.PI*2);
-      mainCtx.fill();
-    }
+  if (data.type === "update") {
+    others[data.id] = { x:data.x, y:data.y };
   }
 
-  function drawMinimap() {
-    miniCtx.clearRect(0,0,miniCanvas.width,miniCanvas.height);
+  if (data.type === "remove") {
+    delete others[data.id];
+  }
+};
 
-    // Player
-    miniCtx.fillStyle = player.color;
-    miniCtx.beginPath();
-    miniCtx.arc(player.x*miniScaleX, player.y*miniScaleY, 4, 0, Math.PI*2);
-    miniCtx.fill();
+window.addEventListener("keydown", e => keys[e.key.toLowerCase()] = true);
+window.addEventListener("keyup", e => keys[e.key.toLowerCase()] = false);
 
-    // Others
-    miniCtx.fillStyle = "orange";
-    for (let id in others) {
-      const op = others[id];
-      miniCtx.beginPath();
-      miniCtx.arc(op.x*miniScaleX, op.y*miniScaleY, 4, 0, Math.PI*2);
-      miniCtx.fill();
+function isWall(x, y) {
+  const mx = Math.floor(x / TILE);
+  const my = Math.floor(y / TILE);
+  return map[my] && map[my][mx] === 1;
+}
+
+function update() {
+  if (keys.a) player.dir -= player.turnSpeed;
+  if (keys.d) player.dir += player.turnSpeed;
+
+  let nx = player.x;
+  let ny = player.y;
+
+  if (keys.w) {
+    nx += Math.cos(player.dir) * player.speed;
+    ny += Math.sin(player.dir) * player.speed;
+  }
+  if (keys.s) {
+    nx -= Math.cos(player.dir) * player.speed;
+    ny -= Math.sin(player.dir) * player.speed;
+  }
+
+  if (!isWall(nx, player.y)) player.x = nx;
+  if (!isWall(player.x, ny)) player.y = ny;
+
+  if (player.id) {
+    socket.send(JSON.stringify({
+      type: "move",
+      x: player.x,
+      y: player.y
+    }));
+  }
+}
+
+// Raycast walls
+function castRays() {
+  const rays = [];
+  const numRays = mainCanvas.width;
+  const halfFov = player.fov / 2;
+
+  for (let i = 0; i < numRays; i++) {
+    const rayAngle = player.dir - halfFov + (i / numRays) * player.fov;
+
+    let dist = 0;
+    let hit = false;
+
+    while (!hit && dist < 1000) {
+      dist += 2;
+      const rx = player.x + Math.cos(rayAngle) * dist;
+      const ry = player.y + Math.sin(rayAngle) * dist;
+
+      if (isWall(rx, ry)) {
+        hit = true;
+        rays.push({ dist, angle: rayAngle });
+      }
     }
+  }
+  return rays;
+}
 
-    // Camera box
-    miniCtx.strokeStyle = "yellow";
-    miniCtx.strokeRect(
-      camera.x * miniScaleX,
-      camera.y * miniScaleY,
-      camera.width * miniScaleX,
-      camera.height * miniScaleY
+function drawWalls(rays) {
+  for (let i = 0; i < rays.length; i++) {
+    const r = rays[i];
+
+    const correctedDist = r.dist * Math.cos(r.angle - player.dir);
+    const wallHeight = (TILE * 300) / correctedDist;
+
+    const shade = Math.max(50, 255 - correctedDist / 2);
+    ctx.fillStyle = `rgb(${shade},${shade},${shade})`;
+
+    ctx.fillRect(
+      i,
+      (mainCanvas.height / 2) - wallHeight / 2,
+      1,
+      wallHeight
     );
   }
+}
 
-  function loop() {
-    update();
-    drawMain();
-    drawMinimap();
-    requestAnimationFrame(loop);
+// Project other players as billboards
+function projectPlayer(px, py) {
+  const dx = px - player.x;
+  const dy = py - player.y;
+
+  const angleToPoint = Math.atan2(dy, dx) - player.dir;
+  const a = ((angleToPoint + Math.PI*3) % (Math.PI*2)) - Math.PI;
+
+  if (Math.abs(a) > player.fov/2) return null;
+
+  const dist = Math.sqrt(dx*dx + dy*dy);
+  const height = 2000 / dist;
+
+  const screenX = (a / (player.fov/2)) * (mainCanvas.width/2) + mainCanvas.width/2;
+
+  return { x: screenX, height };
+}
+
+function drawPlayers() {
+  ctx.fillStyle = "orange";
+  for (let id in others) {
+    const op = others[id];
+    const proj = projectPlayer(op.x, op.y);
+    if (!proj) continue;
+
+    ctx.fillRect(
+      proj.x - 10,
+      (mainCanvas.height/2) - proj.height/2,
+      20,
+      proj.height
+    );
+  }
+}
+
+function drawMinimap() {
+  miniCtx.clearRect(0,0,miniCanvas.width,miniCanvas.height);
+
+  for (let y = 0; y < map.length; y++) {
+    for (let x = 0; x < map[0].length; x++) {
+      miniCtx.fillStyle = map[y][x] === 1 ? "#555" : "#222";
+      miniCtx.fillRect(
+        x*TILE*miniScaleX,
+        y*TILE*miniScaleY,
+        TILE*miniScaleX,
+        TILE*miniScaleY
+      );
+    }
   }
 
-  loop();
+  miniCtx.fillStyle = "deepskyblue";
+  miniCtx.beginPath();
+  miniCtx.arc(player.x*miniScaleX, player.y*miniScaleY, 4, 0, Math.PI*2);
+  miniCtx.fill();
+
+  miniCtx.strokeStyle = "white";
+  miniCtx.beginPath();
+  miniCtx.moveTo(player.x*miniScaleX, player.y*miniScaleY);
+  miniCtx.lineTo(
+    (player.x + Math.cos(player.dir)*40)*miniScaleX,
+    (player.y + Math.sin(player.dir)*40)*miniScaleY
+  );
+  miniCtx.stroke();
+
+  miniCtx.fillStyle = "orange";
+  for (let id in others) {
+    const op = others[id];
+    miniCtx.beginPath();
+    miniCtx.arc(op.x*miniScaleX, op.y*miniScaleY, 4, 0, Math.PI*2);
+    miniCtx.fill();
+  }
+}
+
+function loop() {
+  update();
+
+  ctx.clearRect(0,0,mainCanvas.width,mainCanvas.height);
+
+  const rays = castRays();
+  drawWalls(rays);
+  drawPlayers();
+  drawMinimap();
+
+  requestAnimationFrame(loop);
+}
+
+loop();
 </script>
 
 </body>
