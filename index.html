@@ -47,7 +47,7 @@
   const miniScaleY = miniCanvas.height / worldHeight;
 
   // Multiplayer WebSocket
-  const socket = new WebSocket("ws://localhost:8080");
+  const socket = new WebSocket("ws://localhost:3000");
 
   socket.onmessage = (event) => {
     const data = JSON.parse(event.data);
